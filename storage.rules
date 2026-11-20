@@ -1,0 +1,26 @@
+rules_version = '2';
+// Pozele și videoclipurile provocărilor terminate: quests/{questId}/{fișier}
+// Regulile citesc documentul provocării din Firestore. La prima publicare, consola îți cere
+// permisiunea ca Storage să acceseze Firestore: acceptă.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /quests/{questId}/{fileName} {
+      function quest() {
+        return firestore.get(/databases/(default)/documents/quests/$(questId)).data;
+      }
+
+      // Vede fișierele cel care a făcut provocarea și prietenul care i-a trimis-o.
+      allow read: if request.auth != null
+        && (request.auth.uid == quest().ownerUid || request.auth.uid == quest().fromUid);
+
+      // Încarcă doar cel care face provocarea, cât timp e activă. Poze < 10 MB, video < 100 MB.
+      allow create: if request.auth != null
+        && request.auth.uid == quest().ownerUid
+        && quest().status == 'active'
+        && ((request.resource.contentType.matches('image/.*') && request.resource.size < 10 * 1024 * 1024)
+          || (request.resource.contentType.matches('video/.*') && request.resource.size < 100 * 1024 * 1024));
+
+      allow update, delete: if false;
+    }
+  }
+}
