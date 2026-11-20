@@ -1,7 +1,7 @@
 # Questly
 
 Aplicație mobilă de „side quests” (Expo SDK 58 + React Native + Firebase + Gemini, JavaScript),
-construită după designul din Figma Make (`design/figma-make/`). Textele din aplicație sunt în engleză, ca în design.
+construită după designul din Figma Make. Textele din aplicație sunt în engleză, ca în design.
 
 - **Today:** în fiecare zi, Gemini generează o provocare nouă („Your daily side quest”). O accepți, o poți schimba
   de cel mult 3 ori („Not your vibe? Swap for another”), apoi o termini cu poze, videoclipuri și o descriere.
@@ -86,7 +86,6 @@ src/
   context/     AuthContext, DataContext, ToastContext
   lib/         firebase, ai (Gemini), quests, friends, users, media, demoStore, dates
   constants/   quests (categorii, XP, niveluri, colecția locală de provocări)
-design/figma-make/   # codul exportat din Figma Make (doar referință, nu rulează în Expo)
 firestore.rules, storage.rules
 ```
 
