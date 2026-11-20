@@ -6,9 +6,6 @@ import { ToastProvider } from '../context/ToastContext';
 import { ThemeProvider, useTheme } from '../theme/ThemeContext';
 import { useAppFonts } from '../theme/fonts';
 
-// Ruta de start când nu ești logat: grupul (auth), ecranul de bun venit.
-export const unstable_settings = { initialRouteName: '(auth)' };
-
 /**
  * Stack.Protected ascunde rutele pentru care `guard` e fals, iar Expo Router
  * trimite automat utilizatorul la primul grup disponibil:
