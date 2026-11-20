@@ -1,6 +1,7 @@
 // Bara de jos din design: Today, Friends, Inbox, Profile. Tabul activ are un fundal mov deschis sub iconiță.
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import Icon from './Icon';
 import { useData } from '../context/DataContext';
 import { useStyles, useTheme } from '../theme/ThemeContext';
@@ -13,7 +14,7 @@ const TABS = {
   profile: { label: 'Profile', icon: 'user' },
 };
 
-export default function TabBar({ state, navigation }) {
+export default function TabBar({ state }) {
   const s = useStyles(makeStyles);
   const { colors: c } = useTheme();
   const insets = useSafeAreaInsets();
@@ -35,8 +36,7 @@ export default function TabBar({ state, navigation }) {
             accessibilityState={{ selected: focused }}
             accessibilityLabel={dot ? `${tab.label}, new` : tab.label}
             onPress={() => {
-              const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-              if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
+              if (!focused) router.navigate(route.name === 'index' ? '/' : `/${route.name}`);
             }}
           >
             <View style={[s.iconWrap, focused && { backgroundColor: c.pale }]}>
