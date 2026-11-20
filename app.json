@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Questly",
+    "slug": "questly",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "questly",
+    "ios": {
+      "supportsTablet": true
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-video",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Questly folosește galeria ca să adaugi poze și videoclipuri la provocările terminate.",
+          "cameraPermission": "Questly folosește camera ca să fotografiezi sau să filmezi provocările.",
+          "microphonePermission": "Questly folosește microfonul când filmezi o provocare."
+        }
+      ]
+    ]
+  }
+}

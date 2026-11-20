@@ -1,0 +1,178 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function incoming() { return request.resource.data; }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function isText(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }
+    function userDoc(uid) { return /databases/$(db)/documents/users/$(uid); }
+    function friendshipDoc(a, b) { return /databases/$(db)/documents/friendships/$(a + '_' + b); }
+
+    // Prietenia dintre utilizatorul curent și `other` există și a fost acceptată?
+    // Id-ul documentului are uid-urile în ordine alfabetică.
+    function areFriends(other) {
+      return (me() < other && get(friendshipDoc(me(), other)).data.status == 'accepted')
+          || (other < me() && get(friendshipDoc(other, me())).data.status == 'accepted');
+    }
+
+    // ── users/{uid}: profil public ──
+    // { name, username, usernameLower, bio, xp, completedCount, streak, lastCompletedDate, createdAt }
+    match /users/{uid} {
+      allow read: if signedIn();
+
+      // Se creează în același batch cu usernames/{username}, care trebuie să indice spre acest cont.
+      allow create: if signedIn() && me() == uid
+        && incoming().keys().hasOnly(['name', 'username', 'usernameLower', 'bio', 'xp', 'completedCount', 'streak', 'lastCompletedDate', 'createdAt'])
+        && isText(incoming().name, 2, 40)
+        && isText(incoming().bio, 1, 60)
+        && incoming().username is string
+        && incoming().username.matches('^[a-z0-9._]{3,20}$')
+        && incoming().usernameLower == incoming().username
+        && incoming().xp == 0 && incoming().completedCount == 0 && incoming().streak == 0
+        && incoming().lastCompletedDate == null
+        && getAfter(/databases/$(db)/documents/usernames/$(incoming().username)).data.uid == uid;
+
+      // Numele de utilizator nu se poate schimba (ar strica legătura cu usernames/).
+      // XP-ul și numărul de provocări doar cresc, câte puțin (o provocare terminată odată).
+      allow update: if signedIn() && me() == uid
+        && changed().hasOnly(['name', 'bio', 'xp', 'completedCount', 'streak', 'lastCompletedDate'])
+        && isText(incoming().name, 2, 40)
+        && isText(incoming().bio, 1, 60)
+        && incoming().xp is int && incoming().xp >= resource.data.xp && incoming().xp <= resource.data.xp + 200
+        && incoming().completedCount is int
+        && (incoming().completedCount == resource.data.completedCount || incoming().completedCount == resource.data.completedCount + 1)
+        && incoming().streak is int && incoming().streak >= 0 && incoming().streak <= 100000
+        && (incoming().lastCompletedDate == null || incoming().lastCompletedDate is string);
+
+      allow delete: if false;
+    }
+
+    // ── usernames/{username}: { uid } – garantează că fiecare @username e unic ──
+    match /usernames/{username} {
+      allow get: if signedIn();
+      allow list: if false;
+      // Dacă documentul există deja, scrierea devine „update” și e refuzată → username luat.
+      allow create: if signedIn()
+        && incoming().keys().hasOnly(['uid'])
+        && incoming().uid == me()
+        && username.matches('^[a-z0-9._]{3,20}$')
+        && getAfter(userDoc(me())).data.username == username;
+      allow update, delete: if false;
+    }
+
+    // ── friendships/{uidA_uidB}: { users, requester, status, profiles, createdAt, acceptedAt } ──
+    match /friendships/{pairId} {
+      allow get: if signedIn() && me() in pairId.split('_');
+      allow list: if signedIn() && me() in resource.data.users;
+
+      allow create: if signedIn()
+        && incoming().keys().hasOnly(['users', 'requester', 'status', 'profiles', 'createdAt'])
+        && incoming().requester == me()
+        && incoming().status == 'pending'
+        && incoming().users is list
+        && incoming().users.size() == 2
+        && me() in incoming().users
+        && incoming().users[0] < incoming().users[1]
+        && pairId == incoming().users[0] + '_' + incoming().users[1]
+        // Numele afișate trebuie să fie cele reale, din profiluri.
+        && incoming().profiles[incoming().users[0]].name == get(userDoc(incoming().users[0])).data.name
+        && incoming().profiles[incoming().users[1]].name == get(userDoc(incoming().users[1])).data.name
+        && incoming().profiles[incoming().users[0]].username == get(userDoc(incoming().users[0])).data.username
+        && incoming().profiles[incoming().users[1]].username == get(userDoc(incoming().users[1])).data.username;
+
+      // Doar cel care a primit cererea o poate accepta.
+      allow update: if signedIn()
+        && me() in resource.data.users
+        && me() != resource.data.requester
+        && resource.data.status == 'pending'
+        && incoming().status == 'accepted'
+        && changed().hasOnly(['status', 'acceptedAt']);
+
+      // Refuz, anulare sau ștergerea prieteniei: oricare dintre cei doi.
+      allow delete: if signedIn() && me() in resource.data.users;
+    }
+
+    // ── quests/{questId} ──
+    match /quests/{questId} {
+      function questKeysOk() {
+        return incoming().keys().hasOnly([
+          'ownerUid', 'ownerName', 'fromUid', 'fromName', 'source', 'title', 'description', 'category',
+          'difficulty', 'minutes', 'xp', 'aiGenerated', 'date', 'number', 'status', 'rerolls', 'createdAt'
+        ]);
+      }
+      function contentOk(d) {
+        return isText(d.title, 1, 240)
+          && d.description is string && d.description.size() <= 500
+          && d.category in ['social', 'active', 'creative', 'chill']
+          && d.difficulty in ['easy', 'medium', 'hard']
+          && d.minutes is int && d.minutes >= 1 && d.minutes <= 240
+          && d.xp is int && d.xp >= 0 && d.xp <= 200
+          && d.aiGenerated is bool;
+      }
+      function isOwner() { return signedIn() && me() == resource.data.ownerUid; }
+
+      // Citire: cel care face provocarea și cel care a trimis-o.
+      // Provocarea zilei se citește înainte să existe (ca aplicația să știe dacă trebuie creată).
+      allow get: if signedIn() && (
+        (resource == null && questId.matches('daily_' + me() + '_.*'))
+        || (resource != null && (me() == resource.data.ownerUid || me() == resource.data.fromUid))
+      );
+      allow list: if signedIn() && (me() == resource.data.ownerUid || me() == resource.data.fromUid);
+
+      allow create: if signedIn() && questKeysOk() && contentOk(incoming()) && (
+        // Provocarea zilei: una pe zi (id-ul conține data), fără expeditor.
+        (incoming().source == 'daily'
+          && incoming().ownerUid == me()
+          && incoming().fromUid == null
+          && incoming().status == 'active'
+          && incoming().rerolls == 0
+          && incoming().number is int
+          && incoming().date is string
+          && questId == 'daily_' + me() + '_' + incoming().date)
+        ||
+        // Provocare trimisă unui prieten (doar prietenilor acceptați).
+        (incoming().source == 'friend'
+          && incoming().fromUid == me()
+          && incoming().fromName == get(userDoc(me())).data.name
+          && incoming().ownerUid is string
+          && incoming().ownerUid != me()
+          && incoming().status == 'pending'
+          && areFriends(incoming().ownerUid))
+      );
+
+      allow update: if isOwner() && (
+        // Accept / refuz o provocare primită
+        (resource.data.status == 'pending'
+          && incoming().status in ['active', 'declined']
+          && changed().hasOnly(['status', 'respondedAt']))
+        ||
+        // „Accept quest” pe provocarea zilei
+        (resource.data.source == 'daily'
+          && resource.data.status == 'active'
+          && !('acceptedAt' in resource.data)
+          && changed().hasOnly(['acceptedAt']))
+        ||
+        // Terminare: descriere + poze / videoclipuri (linkuri din Storage)
+        (resource.data.status == 'active'
+          && incoming().status == 'completed'
+          && changed().hasOnly(['status', 'note', 'media', 'completedAt', 'completedDate'])
+          && incoming().note is string && incoming().note.size() <= 500
+          && incoming().media is list && incoming().media.size() <= 6
+          && incoming().completedDate is string)
+        ||
+        // Altă provocare a zilei (maximum 3 schimbări pe zi, ca MAX_REROLLS din aplicație)
+        (resource.data.source == 'daily'
+          && resource.data.status == 'active'
+          && changed().hasOnly(['title', 'description', 'category', 'difficulty', 'minutes', 'xp', 'aiGenerated', 'rerolls'])
+          && incoming().rerolls == resource.data.rerolls + 1
+          && incoming().rerolls <= 3
+          && contentOk(incoming()))
+      );
+
+      // Cel care a trimis provocarea o poate retrage cât timp nu a fost acceptată.
+      allow delete: if signedIn() && me() == resource.data.fromUid && resource.data.status == 'pending';
+    }
+  }
+}
